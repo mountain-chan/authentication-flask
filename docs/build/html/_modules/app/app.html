@@ -1,0 +1,184 @@
+
+<!DOCTYPE html>
+
+<html lang="English">
+  <head>
+    <meta charset="utf-8" />
+    <title>app.app &#8212; PartnerHTC Backend 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for app.app</h1><div class="highlight"><pre>
+<span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">traceback</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="kn">import</span> <span class="n">strftime</span>
+<span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">Flask</span><span class="p">,</span> <span class="n">request</span>
+<span class="kn">from</span> <span class="nn">app.api</span> <span class="kn">import</span> <span class="n">v1</span> <span class="k">as</span> <span class="n">api_v1</span>
+<span class="kn">from</span> <span class="nn">app.extensions</span> <span class="kn">import</span> <span class="n">jwt</span><span class="p">,</span> <span class="n">app_log_handler</span><span class="p">,</span> <span class="n">db</span><span class="p">,</span> <span class="n">ma</span>
+<span class="kn">from</span> <span class="nn">.models</span> <span class="kn">import</span> <span class="n">User</span><span class="p">,</span> <span class="n">user_schema</span>
+<span class="kn">from</span> <span class="nn">.settings</span> <span class="kn">import</span> <span class="n">ProdConfig</span>
+<span class="kn">from</span> <span class="nn">.utils</span> <span class="kn">import</span> <span class="n">send_error</span>
+
+
+<div class="viewcode-block" id="create_app"><a class="viewcode-back" href="../../index.html#app.app.create_app">[docs]</a><span class="k">def</span> <span class="nf">create_app</span><span class="p">(</span><span class="n">config_object</span><span class="o">=</span><span class="n">ProdConfig</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Init App Register Application extensions and API prefix</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        config_object: We will use Prod Config when the environment variable has FLASK_DEBUG=1.</span>
+<span class="sd">        You can run export FLASK_DEBUG=1 in order to run in application dev mode.</span>
+<span class="sd">        You can see config_object in the settings.py file</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">Flask</span><span class="p">(</span><span class="vm">__name__</span><span class="p">,</span> <span class="n">static_url_path</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">static_folder</span><span class="o">=</span><span class="s2">&quot;./files&quot;</span><span class="p">,</span> <span class="n">template_folder</span><span class="o">=</span><span class="s2">&quot;./template&quot;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">from_object</span><span class="p">(</span><span class="n">config_object</span><span class="p">)</span>
+    <span class="n">register_extensions</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="n">register_blueprints</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">app</span></div>
+
+
+<div class="viewcode-block" id="register_extensions"><a class="viewcode-back" href="../../index.html#app.app.register_extensions">[docs]</a><span class="k">def</span> <span class="nf">register_extensions</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Init extension. You can see list extension in the extensions.py</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        app: Flask handler application</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Order matters: Initialize SQLAlchemy before Marshmallow</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="n">ma</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="c1"># logger</span>
+    <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;api&#39;</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">INFO</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">app_log_handler</span><span class="p">)</span>
+
+    <span class="nd">@app</span><span class="o">.</span><span class="n">after_request</span>
+    <span class="k">def</span> <span class="nf">after_request</span><span class="p">(</span><span class="n">response</span><span class="p">):</span>
+        <span class="c1"># This IF avoids the duplication of registry in the log,</span>
+        <span class="c1"># since that 500 is already logged via @app.errorhandler.</span>
+        <span class="k">if</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">!=</span> <span class="mi">500</span><span class="p">:</span>
+            <span class="n">ts</span> <span class="o">=</span> <span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;[%Y-%b-</span><span class="si">%d</span><span class="s1"> %H:%M]&#39;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
+                         <span class="n">ts</span><span class="p">,</span>
+                         <span class="n">request</span><span class="o">.</span><span class="n">remote_addr</span><span class="p">,</span>
+                         <span class="n">request</span><span class="o">.</span><span class="n">method</span><span class="p">,</span>
+                         <span class="n">request</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span>
+                         <span class="n">request</span><span class="o">.</span><span class="n">full_path</span><span class="p">,</span>
+                         <span class="n">response</span><span class="o">.</span><span class="n">status</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">response</span>
+
+    <span class="nd">@app</span><span class="o">.</span><span class="n">errorhandler</span><span class="p">(</span><span class="ne">Exception</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">exceptions</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;[%Y-%b-</span><span class="si">%d</span><span class="s1"> %H:%M]&#39;</span><span class="p">)</span>
+        <span class="n">tb</span> <span class="o">=</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()</span>
+        <span class="n">error</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> 5xx INTERNAL SERVER ERROR</span><span class="se">\n</span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span> \
+            <span class="p">(</span>
+                <span class="n">ts</span><span class="p">,</span>
+                <span class="n">request</span><span class="o">.</span><span class="n">remote_addr</span><span class="p">,</span>
+                <span class="n">request</span><span class="o">.</span><span class="n">method</span><span class="p">,</span>
+                <span class="n">request</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span>
+                <span class="n">request</span><span class="o">.</span><span class="n">full_path</span><span class="p">,</span>
+                <span class="n">tb</span><span class="p">,</span>
+                <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;INTERNAL SERVER ERROR&#39;</span><span class="p">,</span> <span class="n">code</span><span class="o">=</span><span class="mi">500</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="register_blueprints"><a class="viewcode-back" href="../../index.html#app.app.register_blueprints">[docs]</a><span class="k">def</span> <span class="nf">register_blueprints</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Init blueprint for api url</span>
+
+<span class="sd">    :param app: Flask application</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">register_blueprint</span><span class="p">(</span><span class="n">api_v1</span><span class="o">.</span><span class="n">auth</span><span class="o">.</span><span class="n">api</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;/api/v1/auth&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">register_blueprint</span><span class="p">(</span><span class="n">api_v1</span><span class="o">.</span><span class="n">user</span><span class="o">.</span><span class="n">api</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;/api/v1/users&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">register_blueprint</span><span class="p">(</span><span class="n">api_v1</span><span class="o">.</span><span class="n">group</span><span class="o">.</span><span class="n">api</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;/api/v1/groups&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">register_blueprint</span><span class="p">(</span><span class="n">api_v1</span><span class="o">.</span><span class="n">permission</span><span class="o">.</span><span class="n">api</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;/api/v1/permissions&#39;</span><span class="p">)</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">register_blueprint</span><span class="p">(</span><span class="n">api_v1</span><span class="o">.</span><span class="n">security_policy</span><span class="o">.</span><span class="n">api</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;/api/v1/security_policies&#39;</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">PartnerHTC Backend</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, boot.AI.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.0.3</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

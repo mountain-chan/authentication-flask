@@ -1,0 +1,306 @@
+
+<!DOCTYPE html>
+
+<html lang="English">
+  <head>
+    <meta charset="utf-8" />
+    <title>app.api.v1.auth &#8212; PartnerHTC Backend 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for app.api.v1.auth</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">bson</span> <span class="kn">import</span> <span class="n">ObjectId</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">timedelta</span>
+<span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">Blueprint</span>
+<span class="kn">from</span> <span class="nn">werkzeug.security</span> <span class="kn">import</span> <span class="n">check_password_hash</span>
+<span class="kn">from</span> <span class="nn">app.extensions</span> <span class="kn">import</span> <span class="n">jwt</span><span class="p">,</span> <span class="n">red</span><span class="p">,</span> <span class="n">db</span>
+<span class="kn">from</span> <span class="nn">app.models</span> <span class="kn">import</span> <span class="n">User</span><span class="p">,</span> <span class="n">Group</span><span class="p">,</span> <span class="n">user_group_schema</span><span class="p">,</span> <span class="n">SecurityPolicy</span><span class="p">,</span> <span class="n">security_policy_schema</span><span class="p">,</span> \
+    <span class="n">PermissionDetail</span><span class="p">,</span> <span class="n">GroupPermission</span><span class="p">,</span> <span class="n">list_permissions_schema</span><span class="p">,</span> <span class="n">user_include_pass_schema</span>
+<span class="kn">from</span> <span class="nn">app.utils</span> <span class="kn">import</span> <span class="n">parse_req</span><span class="p">,</span> <span class="n">FieldString</span><span class="p">,</span> <span class="n">send_result</span><span class="p">,</span> <span class="n">send_error</span>
+<span class="kn">from</span> <span class="nn">flask_jwt_extended</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">jwt_required</span><span class="p">,</span> <span class="n">create_access_token</span><span class="p">,</span>
+    <span class="n">jwt_refresh_token_required</span><span class="p">,</span> <span class="n">get_jwt_identity</span><span class="p">,</span>
+    <span class="n">create_refresh_token</span><span class="p">,</span> <span class="n">get_raw_jwt</span><span class="p">,</span> <span class="n">get_jti</span>
+<span class="p">)</span>
+
+<span class="n">ACCESS_EXPIRES</span> <span class="o">=</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+<span class="n">REFRESH_EXPIRES</span> <span class="o">=</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+<span class="n">revoked_store</span> <span class="o">=</span> <span class="n">red</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">Blueprint</span><span class="p">(</span><span class="s1">&#39;auth&#39;</span><span class="p">,</span> <span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="login"><a class="viewcode-back" href="../../../../index.html#app.api.v1.auth.login">[docs]</a><span class="nd">@api</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/login&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;POST&#39;</span><span class="p">])</span>
+<span class="k">def</span> <span class="nf">login</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot; This is controller of the login api.</span>
+
+<span class="sd">    Request Body:</span>
+<span class="sd">        username: string, require</span>
+<span class="sd">            The username of the user. Max length accepted is 50 and minimum length is 1</span>
+
+<span class="sd">        password: string, require</span>
+<span class="sd">            The password of the user wanted to log in. Max length accepted is 50 and minimum length is 1</span>
+
+<span class="sd">    Returns:</span>
+
+<span class="sd">        access_token: string</span>
+<span class="sd">            your access token. you needed to save this to access to backend services. Please put</span>
+<span class="sd">            access_token to Header Authorization: Bearer &lt;accees_token&gt;</span>
+
+<span class="sd">        force_change_password: boolean</span>
+<span class="sd">            When true. The user have force change password after login.</span>
+
+<span class="sd">        group: string</span>
+<span class="sd">            Current group of the user</span>
+
+<span class="sd">        list_permissions: list[string,]</span>
+<span class="sd">            Mapping action and resource user can access. For example create_user or get_users</span>
+
+<span class="sd">        login_failed_attempts: number</span>
+<span class="sd">            Number login failed of the current user.</span>
+
+<span class="sd">        logout_after_inactivate: number</span>
+<span class="sd">            Number in seconds. If user do not have any action in the period time. Use will be logged out</span>
+
+<span class="sd">        refresh_token: string</span>
+<span class="sd">            Token use to refresh expire time of the access token. Please put</span>
+<span class="sd">            refresh_token to Header Authorization: Bearer &lt;refresh_token&gt;</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        curl --location --request GET &#39;http://&lt;sv_address&gt;:5012/api/v1/users/4658df34-8630-11ea-b850-588a5a158009&#39; --header &#39;Authorization: Bearer &lt;refresh_token&gt;&#39;</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="n">FieldString</span><span class="p">(),</span>
+        <span class="s1">&#39;password&#39;</span><span class="p">:</span> <span class="n">FieldString</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">json_data</span> <span class="o">=</span> <span class="n">parse_req</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="n">username</span> <span class="o">=</span> <span class="n">json_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;username&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="n">password</span> <span class="o">=</span> <span class="n">json_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;password&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;json_parser_error&#39;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">ex</span><span class="p">))</span>
+
+    <span class="n">row</span> <span class="o">=</span> <span class="n">User</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">filter_by</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="n">username</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">row</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;Username or password incorrect!&#39;</span><span class="p">)</span>
+
+    <span class="n">user</span> <span class="o">=</span> <span class="n">user_include_pass_schema</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">row</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">check_password_hash</span><span class="p">(</span><span class="n">user</span><span class="p">[</span><span class="s1">&#39;password_hash&#39;</span><span class="p">],</span> <span class="n">password</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;Username or password incorrect!&#39;</span><span class="p">)</span>
+
+    <span class="n">access_token</span> <span class="o">=</span> <span class="n">create_access_token</span><span class="p">(</span><span class="n">identity</span><span class="o">=</span><span class="n">user</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">expires_delta</span><span class="o">=</span><span class="n">ACCESS_EXPIRES</span><span class="p">)</span>
+    <span class="n">refresh_token</span> <span class="o">=</span> <span class="n">create_refresh_token</span><span class="p">(</span><span class="n">identity</span><span class="o">=</span><span class="n">user</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">expires_delta</span><span class="o">=</span><span class="n">REFRESH_EXPIRES</span><span class="p">)</span>
+    <span class="n">access_jti</span> <span class="o">=</span> <span class="n">get_jti</span><span class="p">(</span><span class="n">encoded_token</span><span class="o">=</span><span class="n">access_token</span><span class="p">)</span>
+    <span class="n">refresh_jti</span> <span class="o">=</span> <span class="n">get_jti</span><span class="p">(</span><span class="n">encoded_token</span><span class="o">=</span><span class="n">refresh_token</span><span class="p">)</span>
+    <span class="n">revoked_store</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">access_jti</span><span class="p">,</span> <span class="s1">&#39;false&#39;</span><span class="p">,</span> <span class="n">ACCESS_EXPIRES</span> <span class="o">*</span> <span class="mf">1.2</span><span class="p">)</span>
+    <span class="n">revoked_store</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">refresh_jti</span><span class="p">,</span> <span class="s1">&#39;false&#39;</span><span class="p">,</span> <span class="n">REFRESH_EXPIRES</span> <span class="o">*</span> <span class="mf">1.2</span><span class="p">)</span>
+    <span class="n">user_token</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+        <span class="n">_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">ObjectId</span><span class="p">()),</span>
+        <span class="n">user_id</span><span class="o">=</span><span class="n">user</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span>
+        <span class="n">access_jti</span><span class="o">=</span><span class="n">access_jti</span><span class="p">,</span>
+        <span class="n">refresh_jti</span><span class="o">=</span><span class="n">refresh_jti</span>
+    <span class="p">)</span>
+    <span class="c1"># client.db.token.insert_one(user_token)</span>
+
+    <span class="c1"># get group name of this user</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">group</span> <span class="o">=</span> <span class="n">Group</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">user</span><span class="p">[</span><span class="s1">&#39;group_id&#39;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s2">&quot;Database error:&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">ex</span><span class="p">))</span>
+
+    <span class="n">group_json</span> <span class="o">=</span> <span class="n">user_group_schema</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">group</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">group_name</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="k">if</span> <span class="n">group</span><span class="p">:</span>
+        <span class="n">group_name</span> <span class="o">=</span> <span class="n">group_json</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">setting</span> <span class="o">=</span> <span class="n">SecurityPolicy</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">ex</span><span class="p">))</span>
+    <span class="n">security_policy</span> <span class="o">=</span> <span class="n">security_policy_schema</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">setting</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Find list permissions of current group</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">list_items</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="n">PermissionDetail</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">GroupPermission</span><span class="o">.</span><span class="n">permission_id</span><span class="p">,</span>
+                                      <span class="n">PermissionDetail</span><span class="o">.</span><span class="n">descriptions</span><span class="p">,</span>
+                                      <span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">GroupPermission</span><span class="p">,</span> <span class="n">PermissionDetail</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">GroupPermission</span><span class="o">.</span><span class="n">permission_id</span>
+                                             <span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">GroupPermission</span><span class="o">.</span><span class="n">groups_id</span> <span class="o">==</span> <span class="n">user</span><span class="p">[</span><span class="s1">&#39;group_id&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">send_error</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">ex</span><span class="p">))</span>
+    <span class="n">list_permissions</span> <span class="o">=</span> <span class="n">list_permissions_schema</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">list_items</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+
+    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;access_token&#39;</span><span class="p">:</span> <span class="n">access_token</span><span class="p">,</span>
+        <span class="s1">&#39;refresh_token&#39;</span><span class="p">:</span> <span class="n">refresh_token</span><span class="p">,</span>
+        <span class="s1">&#39;logout_after_inactivate&#39;</span><span class="p">:</span> <span class="n">security_policy</span><span class="p">[</span><span class="s1">&#39;logout_after_inactivate&#39;</span><span class="p">],</span>
+        <span class="s1">&#39;login_failed_attempts&#39;</span><span class="p">:</span> <span class="n">security_policy</span><span class="p">[</span><span class="s1">&#39;login_failed_attempts&#39;</span><span class="p">],</span>
+        <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="n">user</span><span class="p">[</span><span class="s1">&#39;username&#39;</span><span class="p">],</span>
+        <span class="s1">&#39;force_change_password&#39;</span><span class="p">:</span> <span class="n">user</span><span class="p">[</span><span class="s1">&#39;force_change_password&#39;</span><span class="p">],</span>
+        <span class="s1">&#39;group&#39;</span><span class="p">:</span> <span class="n">group_name</span><span class="p">,</span>
+        <span class="s1">&#39;list_permissions&#39;</span><span class="p">:</span> <span class="n">list_permissions</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">send_result</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="s1">&#39;Logged in successfully!&#39;</span><span class="p">)</span></div>
+
+
+<span class="c1"># The jwt_refresh_token_required decorator insures a valid refresh</span>
+<span class="c1"># token is present in the request before calling this endpoint. We</span>
+<span class="c1"># can use the get_jwt_identity() function to get the identity of</span>
+<span class="c1"># the refresh token, and use the create_access_token() function again</span>
+<span class="c1"># to make a new access token for this identity.</span>
+<div class="viewcode-block" id="refresh"><a class="viewcode-back" href="../../../../index.html#app.api.v1.auth.refresh">[docs]</a><span class="nd">@api</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/refresh&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;POST&#39;</span><span class="p">])</span>
+<span class="nd">@jwt_refresh_token_required</span>
+<span class="k">def</span> <span class="nf">refresh</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;This api use for refresh expire time of the access token. Please inject the refresh token in Authorization header</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        refresh_token : string, require</span>
+<span class="sd">            If True, will return the parameters for this estimator and</span>
+<span class="sd">            contained subobjects that are estimators.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        access_token : new access token</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">current_user_id</span> <span class="o">=</span> <span class="n">get_jwt_identity</span><span class="p">()</span>
+    <span class="n">access_token</span> <span class="o">=</span> <span class="n">create_access_token</span><span class="p">(</span><span class="n">identity</span><span class="o">=</span><span class="n">current_user_id</span><span class="p">)</span>
+    <span class="n">access_jti</span> <span class="o">=</span> <span class="n">get_jti</span><span class="p">(</span><span class="n">encoded_token</span><span class="o">=</span><span class="n">access_token</span><span class="p">)</span>
+    <span class="n">revoked_store</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">access_jti</span><span class="p">,</span> <span class="s1">&#39;false&#39;</span><span class="p">,</span> <span class="n">ACCESS_EXPIRES</span> <span class="o">*</span> <span class="mf">1.2</span><span class="p">)</span>
+    <span class="n">refresh_jti</span> <span class="o">=</span> <span class="n">get_raw_jwt</span><span class="p">()[</span><span class="s1">&#39;jti&#39;</span><span class="p">]</span>
+    <span class="n">user_token</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+        <span class="n">_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">ObjectId</span><span class="p">()),</span>
+        <span class="n">user_id</span><span class="o">=</span><span class="n">current_user_id</span><span class="p">,</span>
+        <span class="n">access_jti</span><span class="o">=</span><span class="n">access_jti</span><span class="p">,</span>
+        <span class="n">refresh_jti</span><span class="o">=</span><span class="n">refresh_jti</span>
+    <span class="p">)</span>
+    <span class="c1"># client.db.token.insert_one(user_token)</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;access_token&#39;</span><span class="p">:</span> <span class="n">access_token</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">send_result</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">ret</span><span class="p">)</span></div>
+
+
+<span class="c1"># Endpoint for revoking the current users access token</span>
+<div class="viewcode-block" id="logout"><a class="viewcode-back" href="../../../../index.html#app.api.v1.auth.logout">[docs]</a><span class="nd">@api</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/logout&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;DELETE&#39;</span><span class="p">])</span>
+<span class="nd">@jwt_required</span>
+<span class="k">def</span> <span class="nf">logout</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Add token to blacklist</span>
+<span class="sd">    :return:</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">jti</span> <span class="o">=</span> <span class="n">get_raw_jwt</span><span class="p">()[</span><span class="s1">&#39;jti&#39;</span><span class="p">]</span>
+    <span class="n">revoked_store</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">jti</span><span class="p">,</span> <span class="s1">&#39;true&#39;</span><span class="p">,</span> <span class="n">ACCESS_EXPIRES</span> <span class="o">*</span> <span class="mf">1.2</span><span class="p">)</span>
+
+    <span class="c1"># remove token from database</span>
+    <span class="c1"># client.db.token.remove({&#39;access_jti&#39;: jti})</span>
+
+    <span class="k">return</span> <span class="n">send_result</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;logout_successfully&#39;</span><span class="p">)</span></div>
+
+
+<span class="c1"># Endpoint for revoking the current users refresh token</span>
+<span class="nd">@api</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/logout2&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;DELETE&#39;</span><span class="p">])</span>
+<span class="nd">@jwt_refresh_token_required</span>
+<span class="k">def</span> <span class="nf">logout2</span><span class="p">():</span>
+    <span class="n">jti</span> <span class="o">=</span> <span class="n">get_raw_jwt</span><span class="p">()[</span><span class="s1">&#39;jti&#39;</span><span class="p">]</span>
+    <span class="n">revoked_store</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">jti</span><span class="p">,</span> <span class="s1">&#39;true&#39;</span><span class="p">,</span> <span class="n">REFRESH_EXPIRES</span> <span class="o">*</span> <span class="mf">1.2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">send_result</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s1">&#39;logout_successfully&#39;</span><span class="p">)</span>
+
+
+<span class="c1"># check token revoked_store</span>
+<span class="nd">@jwt</span><span class="o">.</span><span class="n">token_in_blacklist_loader</span>
+<span class="k">def</span> <span class="nf">check_if_token_is_revoked</span><span class="p">(</span><span class="n">decrypted_token</span><span class="p">):</span>
+    <span class="n">jti</span> <span class="o">=</span> <span class="n">decrypted_token</span><span class="p">[</span><span class="s1">&#39;jti&#39;</span><span class="p">]</span>
+    <span class="n">entry</span> <span class="o">=</span> <span class="n">revoked_store</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">jti</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">entry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="kc">False</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">PartnerHTC Backend</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, boot.AI.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.0.3</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

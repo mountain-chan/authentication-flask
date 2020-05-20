@@ -1,0 +1,22 @@
+version: '3'
+services:
+  api:
+    build: .
+    command: >
+      gunicorn -b 0.0.0.0:5011
+        --access-logfile -
+        --workers 2
+        --threads 4
+        --timeout 60
+        "manage:app"
+    ports:
+      - "5011:5011"
+    restart: always
+    volumes:
+      - '.:/app'
+    links:
+      - db
+  db:
+    image: mongo:3.6.14
+  redis:
+    image: "redis"
