@@ -6,7 +6,7 @@ pymongo==3.5.1
 redis==2.10.6
 regex==2018.01.10
 webargs==1.8.1
-Werkzeug==0.12.2
+Werkzeug==0.15.3
 Flask-JWT-Extended==3.3.4
 Flask-PyMongo==0.5.1
 Flask-Redis==0.3.0
